@@ -1,6 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
-import { Home, FileText, GraduationCap, Hash, BarChart3, Bell, User } from "lucide-react";
+import { Home, GraduationCap, Hash, BarChart3, Bell, User } from "lucide-react";
 import { Button } from "./ui/button";
+import logo from "@/assets/logo.png";
 
 const Layout = ({ children }: { children: React.ReactNode }) => {
   const location = useLocation();
@@ -21,9 +22,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
         <div className="container mx-auto px-4">
           <div className="flex h-20 items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-card border-4 border-secondary shadow-md">
-                <FileText className="h-7 w-7 text-primary" />
-              </div>
+              <img src={logo} alt="Parliament of Ghana Logo" className="h-16 w-16 object-contain" />
               <div>
                 <h1 className="text-2xl font-bold text-primary-foreground tracking-tight">PARLIAMENT OF GHANA</h1>
                 <p className="text-sm text-secondary font-semibold">Interactive Hansard System</p>
