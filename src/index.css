@@ -18,10 +18,11 @@ All colors MUST be HSL.
     --popover-foreground: 140 60% 12%;
 
     /* Parliament Deep Green - Primary (from official website) */
-    --primary: 140 85% 18%;
+    --primary: 140 100% 15%;
     --primary-foreground: 0 0% 100%;
     --primary-light: 140 70% 30%;
-    --primary-dark: 140 90% 12%;
+    --primary-dark: 140 100% 10%;
+    --primary-bright: 140 100% 35%;
 
     /* Ghanaian Gold - Secondary */
     --secondary: 43 96% 56%;

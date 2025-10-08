@@ -24,8 +24,8 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
             <div className="flex items-center gap-3">
               <img src={logo} alt="Parliament of Ghana Logo" className="h-16 w-16 object-contain" />
               <div>
-                <h1 className="text-2xl font-bold text-primary-foreground tracking-tight">PARLIAMENT OF GHANA</h1>
-                <p className="text-sm text-secondary font-semibold">Interactive Hansard System</p>
+                <h1 className="text-2xl font-bold text-primary-bright tracking-tight">PARLIAMENT OF GHANA</h1>
+                <p className="text-sm text-primary-foreground font-medium">Interactive Hansard System</p>
               </div>
             </div>
 
