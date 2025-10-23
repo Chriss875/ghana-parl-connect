@@ -8,9 +8,9 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 
   const navItems = [
     { path: "/", label: "Hansard", icon: Home },
-    { path: "/space", label: "Space", icon: Hash },
-    { path: "/education", label: "Education", icon: GraduationCap },
     { path: "/dashboard", label: "Dashboard", icon: BarChart3 },
+    { path: "/education", label: "Education", icon: GraduationCap },
+    { path: "/space", label: "Space", icon: Hash },
   ];
 
   const isActive = (path: string) => location.pathname === path;

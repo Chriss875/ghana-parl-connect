@@ -24,8 +24,32 @@ const Hansard = () => {
   const [speakerFilter, setSpeakerFilter] = useState("Hon. Mahama Ayariga");
   const [topicFilter, setTopicFilter] = useState("all");
 
-  // Debates will be populated from backend search results
-  const [debates, setDebates] = useState<any[]>([]);
+  // Sample mock debates shown until backend results appear
+  const SAMPLE_DEBATES = [
+    {
+      id: 1,
+      title: "Proceedings on the 2025 Budget, Mid-Year Review, and Associated Legislation",
+      description: "Parliamentary session focused on the Mid-Year Fiscal Policy Review of the 2025 Budget, with key revenue and spending updates.",
+      date: "2025-07-01",
+      speaker: "Hon. Ken Ofori-Atta",
+      tags: ["Budget", "Finance"],
+      category: "Finance",
+      committee: "Finance Committee"
+    },
+    {
+      id: 2,
+      title: "Debate on Education Sector Funding Allocations",
+      description: "Members discussed allocations for GETFund and education initiatives in 2025.",
+      date: "2025-03-29",
+      speaker: "Hon. Mahama Ayariga",
+      tags: ["Education", "GETFund"],
+      category: "Education",
+      committee: "Education Committee"
+    }
+  ];
+
+  // Debates will be populated from backend search results (start with mock data)
+  const [debates, setDebates] = useState<any[]>(SAMPLE_DEBATES);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
