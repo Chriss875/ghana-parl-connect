@@ -7,6 +7,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import SPEAKERS from "@/data/speakers";
 import DATES from "@/data/dates";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogClose,
+} from "@/components/ui/dialog";
 
 const Hansard = () => {
   const [searchQuery, setSearchQuery] = useState("");
@@ -18,6 +28,18 @@ const Hansard = () => {
   const [debates, setDebates] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailData, setDetailData] = useState<any | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [activeDetailId, setActiveDetailId] = useState<number | null>(null);
+  // store last-applied filters so readFullDebate can reuse them
+  const [lastAppliedFilters, setLastAppliedFilters] = useState<{
+    date?: string;
+    topic?: string;
+    speaker?: string;
+  } | null>(null);
 
   const categoryColors: Record<string, string> = {
     Education: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
@@ -28,7 +50,9 @@ const Hansard = () => {
   // lazy import the api to avoid unused import before the file exists in the repo
   async function applyFilters() {
     setError(null);
+    setError(null);
     setLoading(true);
+    setSearchLoading(true);
     try {
       const { searchDebates } = await import("@/lib/api");
       // Frontend should send: { date: '29th March 2025', topic: 'Education', speaker: 'Hon. Mahama Ayariga' }
@@ -38,6 +62,8 @@ const Hansard = () => {
         topic: topicFilter === "all" ? undefined : topicFilter,
         speaker: speakerFilter === "all" ? undefined : speakerFilter,
       };
+      // store filters used for this search so readFullDebate can reuse them
+      setLastAppliedFilters({ date: body.date, topic: body.topic, speaker: body.speaker });
       const res = await searchDebates(body as any);
 
       // Backend returns a summary field that contains a fenced code block with JSON.
@@ -79,33 +105,53 @@ const Hansard = () => {
       setError(err?.message || "Failed to load debates");
     } finally {
       setLoading(false);
+      setSearchLoading(false);
     }
   }
 
   async function readFullDebate(id: number) {
     setError(null);
-    setLoading(true);
+    setDetailData(null);
+    setDetailOpen(true);
+    setDetailLoading(true);
+    setActiveDetailId(id);
     try {
       const { getFullDebate } = await import("@/lib/api");
       // Format the debate date as '29th March 2025' if available for the API
       const target = debates.find((d) => d.id === id);
-      const formattedDate = target && target.date ? formatOrdinalDate(target.date) : undefined;
-  const topic = target?.category || (target?.tags && target.tags[0]) || topicFilter === "all" ? undefined : topicFilter;
-  const speaker = target?.speaker || (speakerFilter === "all" ? undefined : speakerFilter) || undefined;
+      // Compute date to send: prefer the debate's date, then last applied filters, then undefined
+      const dateFromTarget = target && target.date ? target.date : undefined;
+      const dateToSend = dateFromTarget
+        ? formatOrdinalDate(dateFromTarget)
+        : lastAppliedFilters?.date
+        ? formatOrdinalDate(lastAppliedFilters.date as string)
+        : undefined;
 
-  // getFullDebate will POST { id, date, topic, speaker }
-  const detail = await getFullDebate(id, formattedDate, topic as any, speaker as any);
+      // Determine topic: prefer debate.category, then first tag, then currently selected topicFilter (if not 'all'),
+      // then fall back to lastAppliedFilters.topic
+      const topicFromTarget = target?.category || (Array.isArray(target?.tags) ? target.tags[0] : undefined);
+      const topicFromFilters = topicFilter && topicFilter !== "all" ? topicFilter : undefined;
+      const topic = topicFromTarget || topicFromFilters || lastAppliedFilters?.topic || undefined;
 
-      const fullHtml = `<h1>${detail.title}</h1><p><strong>${detail.speaker} — ${detail.date}</strong></p><div>${detail.full_context}</div>`;
-      const win = window.open("", "_blank");
-      if (win) {
-        win.document.title = detail.title;
-        win.document.body.innerHTML = fullHtml;
+      // Determine speaker: prefer debate.speaker, then currently selected speakerFilter (if not 'all'), then lastAppliedFilters.speaker
+      const speaker = target?.speaker || (speakerFilter && speakerFilter !== "all" ? speakerFilter : lastAppliedFilters?.speaker || undefined);
+
+      // Validate required fields before calling backend (backend requires topic)
+      if (!topic) {
+        setError("Topic is required to fetch the full debate. Please select a topic or apply filters first.");
+        setDetailLoading(false);
+        setActiveDetailId(null);
+        return;
       }
+
+      // getFullDebate will POST { id, date, topic, speaker }
+      const detail = await getFullDebate(id, dateToSend, topic as any, speaker as any);
+      setDetailData(detail);
     } catch (err: any) {
       setError(err?.message || "Failed to load full debate");
     } finally {
-      setLoading(false);
+      setDetailLoading(false);
+      setActiveDetailId(null);
     }
   }
 
@@ -299,8 +345,15 @@ const Hansard = () => {
 
             <div className="flex items-end">
               <Button onClick={applyFilters} className="w-full gap-2">
-                <Filter className="h-4 w-4" />
-                Apply Filters
+                {searchLoading ? (
+                  <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                  </svg>
+                ) : (
+                  <Filter className="h-4 w-4" />
+                )}
+                {searchLoading ? "Loading..." : "Apply Filters"}
               </Button>
             </div>
           </div>
@@ -363,6 +416,121 @@ const Hansard = () => {
           </Card>
         ))}
       </div>
+
+      {/* Full debate dialog */}
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{detailData?.title || "Full Debate"}</DialogTitle>
+            <DialogDescription>
+              {detailData ? `${detailData.speaker || ""} — ${detailData.date || ""}` : ""}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="mt-4 max-h-[60vh] overflow-auto prose prose-sm">
+            {detailLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <svg className="h-8 w-8 animate-spin text-muted-foreground" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+              </div>
+            ) : detailData ? (
+              // fullText is trusted HTML from backend; ensure backend sanitizes it.
+              <div dangerouslySetInnerHTML={{ __html: detailData.fullText }} />
+            ) : (
+              <div>{error || "No content available."}</div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button onClick={() => setDetailOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Search results dialog for Apply Filters */}
+      <Dialog open={searchOpen} onOpenChange={setSearchOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Search Results</DialogTitle>
+            <DialogDescription>Filtered Hansard results</DialogDescription>
+          </DialogHeader>
+
+          <div className="mt-4 max-h-[60vh] overflow-auto">
+            {searchLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <svg className="h-8 w-8 animate-spin text-muted-foreground" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                </svg>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {debates.map((debate) => (
+                  <Card key={debate.id} className="hover:shadow-lg transition-shadow">
+                    <CardHeader>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="space-y-2 flex-1">
+                          <Badge className={categoryColors[debate.category || ""] || ""}>
+                            {debate.category || ""}
+                          </Badge>
+                          <CardTitle className="text-xl">{debate.title}</CardTitle>
+                          <CardDescription>{debate.description}</CardDescription>
+                        </div>
+                        <Button variant="ghost" size="icon">
+                          <ExternalLink className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
+                        <div className="flex items-center gap-2">
+                          <Calendar className="h-4 w-4" />
+                          {debate.date}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <User className="h-4 w-4" />
+                          {debate.speaker}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        {(() => {
+                          const tags: string[] = Array.isArray(debate.tags)
+                            ? debate.tags
+                            : typeof debate.tags === "string"
+                            ? debate.tags.split(",").map((t: string) => t.trim())
+                            : [];
+                          return tags.map((tag: string) => (
+                            <Badge key={tag} variant="outline">
+                              {tag}
+                            </Badge>
+                          ));
+                        })()}
+                      </div>
+
+                      <Button onClick={() => readFullDebate(debate.id)} className="w-full md:w-auto">
+                        {activeDetailId === debate.id ? (
+                          <svg className="h-4 w-4 animate-spin mr-2 inline-block" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                          </svg>
+                        ) : null}
+                        Read Full Debate
+                      </Button>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button onClick={() => setSearchOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

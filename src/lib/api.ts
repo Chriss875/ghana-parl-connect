@@ -41,7 +41,7 @@ export type SearchDebatesResponse = {
 
 
 export async function searchDebates(body: SearchDebatesRequest) {
-  const url = `http://localhost:8000/api/query`;
+  const url = `${API_BASE}/api/query`;
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -69,11 +69,18 @@ export async function getFullDebate(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  return handleRes(res) as Promise<{
-    title: string;
-    full_context: string;
-    date?: string;
-    speaker?: string;
-    tags?: string | string[];
-  }>;
+  const data = (await handleRes(res)) as any;
+  // Normalize backend keys to our frontend DebateDetail shape
+  const detail: DebateDetail = {
+    id: data.id ?? (typeof id === "number" ? id : 0),
+    title: data.title,
+    description: data.summary || data.description || "",
+    date: data.date,
+    speaker: data.speaker,
+    tags: Array.isArray(data.tags) ? data.tags : typeof data.tags === "string" ? data.tags.split(",").map((t: string) => t.trim()) : data.tags,
+    category: data.category || (Array.isArray(data.tags) ? data.tags[0] : undefined),
+    fullText: data.full_context || data.fullText || data.full_text || "",
+    attachments: data.attachments,
+  };
+  return detail;
 }
