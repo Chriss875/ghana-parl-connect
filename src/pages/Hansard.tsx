@@ -4,11 +4,13 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import SPEAKERS from "@/data/speakers";
+import DATES from "@/data/dates";
 import { Badge } from "@/components/ui/badge";
 
 const Hansard = () => {
   const [searchQuery, setSearchQuery] = useState("");
-  const [dateFilter, setDateFilter] = useState("29th March 2025");
+  const [dateFilter, setDateFilter] = useState("1st July 2025");
   const [speakerFilter, setSpeakerFilter] = useState("Hon. Mahama Ayariga");
   const [topicFilter, setTopicFilter] = useState("all");
 
@@ -161,21 +163,33 @@ const Hansard = () => {
             <div className="space-y-2">
               <label className="text-sm font-medium flex items-center gap-2">
                 <Calendar className="h-4 w-4" />
-                Date Range
+                Date
               </label>
-              <Select value={dateFilter} onValueChange={setDateFilter}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="29th March 2025">29th March 2025</SelectItem>
-                  <SelectItem value="last30days">Last 30 days</SelectItem>
-                  <SelectItem value="last90days">Last 90 days</SelectItem>
-                  <SelectItem value="thisyear">This Year</SelectItem>
-                  <SelectItem value="lastyear">Last Year</SelectItem>
-                  <SelectItem value="custom">Custom Range</SelectItem>
-                </SelectContent>
-              </Select>
+              {/* Free-text date input */}
+              <Input
+                placeholder="1st July 2025"
+                value={dateFilter}
+                onChange={(e) => setDateFilter(e.target.value)}
+                aria-label="Date filter (e.g. 1st July 2025)"
+              />
+
+              {/* Dropdown selector for common dates; selecting fills the input above */}
+              <div className="mt-2">
+                <Select value={dateFilter} onValueChange={(v) => setDateFilter(v)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent side="bottom" position="popper" align="start">
+                    <div className="max-h-72 overflow-auto">
+                      {DATES.map((d) => (
+                        <SelectItem key={d} value={d}>
+                          {d}
+                        </SelectItem>
+                      ))}
+                    </div>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -183,18 +197,32 @@ const Hansard = () => {
                 <User className="h-4 w-4" />
                 Speaker
               </label>
-              <Select value={speakerFilter} onValueChange={setSpeakerFilter}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Speakers</SelectItem>
-                  <SelectItem value="Hon. Mahama Ayariga">Hon. Mahama Ayariga</SelectItem>
-                  <SelectItem value="jane-mensah">Hon. Jane Mensah</SelectItem>
-                  <SelectItem value="kwame-asante">Hon. Kwame Asante</SelectItem>
-                  <SelectItem value="akosua-frema">Hon. Akosua Frema</SelectItem>
-                </SelectContent>
-              </Select>
+              {/* Free-text speaker input — user can type their own value */}
+              <Input
+                placeholder="Hon. Mahama Ayariga"
+                value={speakerFilter}
+                onChange={(e) => setSpeakerFilter(e.target.value)}
+                aria-label="Speaker filter (e.g. Hon. Mahama Ayariga)"
+              />
+
+              {/* Also keep the dropdown selector so users can pick from the list; selecting an item updates the input above */}
+              <div className="mt-2">
+                <Select value={speakerFilter} onValueChange={(v) => setSpeakerFilter(v)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent side="bottom" position="popper" align="start">
+                    <div className="max-h-72 overflow-auto">
+                      <SelectItem value="all">All Speakers</SelectItem>
+                      {SPEAKERS.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </div>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -206,7 +234,7 @@ const Hansard = () => {
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent side="bottom" position="popper" align="start">
                   <SelectItem value="all">All Topics</SelectItem>
                   <SelectItem value="Education">Education</SelectItem>
                   <SelectItem value="Health">Health</SelectItem>

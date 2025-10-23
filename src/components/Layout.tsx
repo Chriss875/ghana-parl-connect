@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { Home, GraduationCap, Hash, BarChart3, Bell, User } from "lucide-react";
+import { Home, GraduationCap, Hash, BarChart3 } from "lucide-react";
 import { Button } from "./ui/button";
 import logo from "@/assets/logo.png";
 
@@ -44,15 +44,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
               ))}
             </nav>
 
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="icon" className="text-primary-foreground hover:bg-primary-light">
-                <Bell className="h-5 w-5" />
-              </Button>
-              <Button variant="secondary" className="gap-2 font-semibold">
-                <User className="h-4 w-4" />
-                <span className="hidden sm:inline">Profile</span>
-              </Button>
-            </div>
+            <div className="flex items-center gap-2" />
           </div>
         </div>
       </header>
