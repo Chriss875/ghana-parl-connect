@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Search, Filter, Calendar, User, Tag, ExternalLink } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -126,6 +126,41 @@ const Hansard = () => {
     return `${ordinal(day)} ${month} ${year}`;
   }
 
+  // Autocomplete state for dates and speakers (custom dropdown)
+  const [showDatesList, setShowDatesList] = useState(false);
+  const [showSpeakersList, setShowSpeakersList] = useState(false);
+  const [filteredDates, setFilteredDates] = useState<string[]>(DATES);
+  const [filteredSpeakers, setFilteredSpeakers] = useState<string[]>(SPEAKERS);
+  const dateInputRef = useRef<HTMLInputElement | null>(null);
+  const speakerInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    // When dateFilter changes, update filteredDates (show full list when empty)
+    if (!dateFilter) {
+      setFilteredDates(DATES);
+    } else {
+      const q = dateFilter.toLowerCase();
+      setFilteredDates(DATES.filter((d) => d.toLowerCase().includes(q)));
+    }
+  }, [dateFilter]);
+
+  useEffect(() => {
+    if (!speakerFilter || speakerFilter === "all") {
+      setFilteredSpeakers(SPEAKERS);
+    } else {
+      const q = speakerFilter.toLowerCase();
+      setFilteredSpeakers(SPEAKERS.filter((s) => s.toLowerCase().includes(q)));
+    }
+  }, [speakerFilter]);
+
+  // helpers that allow clicks inside the dropdown before blur hides it
+  function handleDateBlur() {
+    setTimeout(() => setShowDatesList(false), 150);
+  }
+  function handleSpeakerBlur() {
+    setTimeout(() => setShowSpeakersList(false), 150);
+  }
+
   return (
     <div className="space-y-6 pb-20 md:pb-6">
       {/* Hero Section */}
@@ -165,30 +200,39 @@ const Hansard = () => {
                 <Calendar className="h-4 w-4" />
                 Date
               </label>
-              {/* Free-text date input */}
-              <Input
-                placeholder="1st July 2025"
-                value={dateFilter}
-                onChange={(e) => setDateFilter(e.target.value)}
-                aria-label="Date filter (e.g. 1st July 2025)"
-              />
-
-              {/* Dropdown selector for common dates; selecting fills the input above */}
-              <div className="mt-2">
-                <Select value={dateFilter} onValueChange={(v) => setDateFilter(v)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent side="bottom" position="popper" align="start">
-                    <div className="max-h-72 overflow-auto">
-                      {DATES.map((d) => (
-                        <SelectItem key={d} value={d}>
+              {/* Free-text date input with native datalist suggestions (hybrid single box) */}
+              <div className="relative">
+                <Input
+                  ref={dateInputRef}
+                  placeholder="1st July 2025"
+                  value={dateFilter}
+                  onChange={(e) => setDateFilter(e.target.value)}
+                  onFocus={() => setShowDatesList(true)}
+                  onBlur={handleDateBlur}
+                  aria-label="Date filter (e.g. 1st July 2025)"
+                />
+                {showDatesList && (
+                  <div className="absolute z-50 mt-1 w-full max-h-60 overflow-auto rounded-md border bg-popover p-1">
+                    {filteredDates.length === 0 ? (
+                      <div className="p-2 text-sm text-muted-foreground">No dates</div>
+                    ) : (
+                      filteredDates.map((d) => (
+                        <button
+                          key={d}
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            setDateFilter(d);
+                            setShowDatesList(false);
+                          }}
+                          className="block w-full text-left px-3 py-2 text-sm hover:bg-accent/20"
+                        >
                           {d}
-                        </SelectItem>
-                      ))}
-                    </div>
-                  </SelectContent>
-                </Select>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -197,31 +241,39 @@ const Hansard = () => {
                 <User className="h-4 w-4" />
                 Speaker
               </label>
-              {/* Free-text speaker input — user can type their own value */}
-              <Input
-                placeholder="Hon. Mahama Ayariga"
-                value={speakerFilter}
-                onChange={(e) => setSpeakerFilter(e.target.value)}
-                aria-label="Speaker filter (e.g. Hon. Mahama Ayariga)"
-              />
-
-              {/* Also keep the dropdown selector so users can pick from the list; selecting an item updates the input above */}
-              <div className="mt-2">
-                <Select value={speakerFilter} onValueChange={(v) => setSpeakerFilter(v)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent side="bottom" position="popper" align="start">
-                    <div className="max-h-72 overflow-auto">
-                      <SelectItem value="all">All Speakers</SelectItem>
-                      {SPEAKERS.map((s) => (
-                        <SelectItem key={s} value={s}>
+              {/* Free-text speaker input with native datalist suggestions (hybrid single box) */}
+              <div className="relative">
+                <Input
+                  ref={speakerInputRef}
+                  placeholder="Hon. Mahama Ayariga"
+                  value={speakerFilter}
+                  onChange={(e) => setSpeakerFilter(e.target.value)}
+                  onFocus={() => setShowSpeakersList(true)}
+                  onBlur={handleSpeakerBlur}
+                  aria-label="Speaker filter (e.g. Hon. Mahama Ayariga)"
+                />
+                {showSpeakersList && (
+                  <div className="absolute z-50 mt-1 w-full max-h-72 overflow-auto rounded-md border bg-popover p-1">
+                    {filteredSpeakers.length === 0 ? (
+                      <div className="p-2 text-sm text-muted-foreground">No speakers</div>
+                    ) : (
+                      filteredSpeakers.map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            setSpeakerFilter(s);
+                            setShowSpeakersList(false);
+                          }}
+                          className="block w-full text-left px-3 py-2 text-sm hover:bg-accent/20"
+                        >
                           {s}
-                        </SelectItem>
-                      ))}
-                    </div>
-                  </SelectContent>
-                </Select>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
