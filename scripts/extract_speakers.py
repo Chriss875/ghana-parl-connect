@@ -14,11 +14,14 @@ import os
 from pathlib import Path
 from typing import Set, List
 
-try:
-    from pdfminer.high_level import extract_text
-except Exception as e:
-    print("pdfminer.six is required. Install with: python -m pip install pdfminer.six")
-    raise
+def _lazy_extract_text(path: str):
+    try:
+        import importlib
+        mod = importlib.import_module('pdfminer.high_level')
+        extract_text = getattr(mod, 'extract_text')
+    except Exception:
+        raise RuntimeError("pdfminer.six is required. Install with: python -m pip install pdfminer.six")
+    return extract_text
 
 HON_PATTERN = re.compile(
     r"\b(Hon(?:\.|orable)?)(?:\s+|\s*,\s*)([A-Z][A-Za-zÀ-ÖØ-öø-ÿ'\-]+(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ'\-]+){0,3})",
@@ -34,7 +37,7 @@ def clean_name(hon: str, rest: str) -> str:
 
 def extract_from_pdf(path: Path) -> List[str]:
     try:
-        text = extract_text(str(path))
+        text = _lazy_extract_text(str(path))(str(path))
     except Exception as e:
         print(f"Failed to extract text from {path}: {e}")
         return []

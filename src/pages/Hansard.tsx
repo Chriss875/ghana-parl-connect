@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import SPEAKERS from "@/data/speakers";
 import DATES from "@/data/dates";
+import { MarkdownRenderer } from "@/components/MarkDownRenderer";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -71,6 +72,37 @@ const Hansard = () => {
     Technology: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200"
   };
 
+  // Keep a local history of recent debates (persisted to localStorage)
+  const [debateHistory, setDebateHistory] = useState<any[]>(() => {
+    try {
+      const raw = localStorage.getItem('debate_history');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  function addToHistory(newDebates: any[]) {
+    if (!Array.isArray(newDebates) || newDebates.length === 0) return;
+    setDebateHistory((prev) => {
+      const map = new Map<string, any>();
+      // Newest first: add incoming debates first
+      for (const d of newDebates) {
+        const key = d.id != null ? `id:${d.id}` : `t:${String(d.title)}:${String(d.date)}`;
+        if (!map.has(key) && d) map.set(key, d);
+      }
+      for (const p of prev) {
+        const key = p.id != null ? `id:${p.id}` : `t:${String(p.title)}:${String(p.date)}`;
+        if (!map.has(key) && p) map.set(key, p);
+      }
+      const merged = Array.from(map.values()).slice(0, 10);
+      try {
+        localStorage.setItem('debate_history', JSON.stringify(merged));
+      } catch {}
+      return merged;
+    });
+  }
+
   // lazy import the api to avoid unused import before the file exists in the repo
   async function applyFilters() {
     setError(null);
@@ -96,7 +128,7 @@ const Hansard = () => {
       if (fencedJsonMatch && fencedJsonMatch[1]) {
         try {
           const parsed = JSON.parse(fencedJsonMatch[1]);
-          setDebates([
+          const newDebates = [
             {
               id: parsed.id || 0,
               title: parsed.title || res.title,
@@ -106,7 +138,9 @@ const Hansard = () => {
               tags: parsed.tags ? parsed.tags.split ? parsed.tags.split(",") : parsed.tags : res.tags,
               category: parsed.category || parsed.tags?.[0] || res.tags?.[0]
             }
-          ]);
+          ];
+          setDebates(newDebates);
+          addToHistory(newDebates);
           return;
         } catch (e) {
           // fallthrough to using the response directly
@@ -114,7 +148,7 @@ const Hansard = () => {
       }
 
       // Fallback: create a single debate entry from the response fields
-      setDebates([
+      const newDebates = [
         {
           id: 0,
           title: res.title,
@@ -124,7 +158,9 @@ const Hansard = () => {
           tags: res.tags || [],
           category: res.tags?.[0] || "",
         }
-      ]);
+      ];
+      setDebates(newDebates);
+      addToHistory(newDebates);
     } catch (err: any) {
       setError(err?.message || "Failed to load debates");
     } finally {
@@ -384,6 +420,33 @@ const Hansard = () => {
         </CardContent>
       </Card>
 
+        {/* Recent searches / history */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">Recent Searches</CardTitle>
+            <CardDescription>Last {debateHistory?.length || 0} debates you opened</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {debateHistory.length === 0 ? (
+              <div className="text-sm text-muted-foreground">No recent debates</div>
+            ) : (
+              <div className="grid gap-2">
+                {debateHistory.map((d: any) => (
+                  <div key={(d.id ?? d.title) + String(d.date)} className="flex items-center justify-between gap-2">
+                    <div>
+                      <div className="font-medium text-sm">{d.title}</div>
+                      <div className="text-xs text-muted-foreground">{d.date} — {d.speaker || ''}</div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="ghost" size="sm" onClick={() => readFullDebate(d.id ?? 0)}>Open</Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
       {/* Debate Cards */}
       <div className="grid gap-6">
         {debates.map((debate) => (
@@ -451,7 +514,7 @@ const Hansard = () => {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="mt-4 max-h-[60vh] overflow-auto prose prose-sm">
+          <div className="mt-4 max-h-[60vh] overflow-auto">
             {detailLoading ? (
               <div className="flex items-center justify-center py-12">
                 <svg className="h-8 w-8 animate-spin text-muted-foreground" viewBox="0 0 24 24">
@@ -460,8 +523,9 @@ const Hansard = () => {
                 </svg>
               </div>
             ) : detailData ? (
-              // fullText is trusted HTML from backend; ensure backend sanitizes it.
-              <div dangerouslySetInnerHTML={{ __html: detailData.fullText }} />
+              <div className="prose prose-sm">
+                <MarkdownRenderer content={detailData.fullText || ""} darkMode={false} />
+              </div>
             ) : (
               <div>{error || "No content available."}</div>
             )}

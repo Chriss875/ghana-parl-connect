@@ -16,11 +16,14 @@ from pathlib import Path
 from datetime import datetime
 from typing import Set, List
 
-try:
-    from pdfminer.high_level import extract_text
-except Exception:
-    print("pdfminer.six is required. Install with: python -m pip install pdfminer.six")
-    raise
+def _lazy_extract_text(path: str):
+    try:
+        import importlib
+        mod = importlib.import_module('pdfminer.high_level')
+        extract_text = getattr(mod, 'extract_text')
+    except Exception:
+        raise RuntimeError("pdfminer.six is required. Install with: python -m pip install pdfminer.six")
+    return extract_text
 
 
 DATE_PATTERNS = [
@@ -81,7 +84,7 @@ def extract_dates_from_text(text: str) -> List[str]:
 
 def extract_from_pdf(path: Path) -> List[str]:
     try:
-        text = extract_text(str(path))
+        text = _lazy_extract_text(str(path))(str(path))
     except Exception as e:
         print(f"Failed to extract text from {path}: {e}")
         return []
