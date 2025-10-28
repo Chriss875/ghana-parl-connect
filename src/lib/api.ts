@@ -1,3 +1,5 @@
+import { fetchEventSource } from './fetchEventSource';
+
 export type DebateSummary = {
   id: number;
   title: string;
@@ -140,251 +142,180 @@ export async function getDashboardForDate(body: DashboardRequest) {
   }
 }
 
-
-// lib/api.ts
-
+// src/lib/readFullDebateStream.ts
 export type ReadFullDebateOptions = {
   date: string;
   topic: string;
   speaker?: string;
-  onUpdate?: (partialText: string) => void;
-  onFinal?: (data: any) => void;
-  onError?: (error: string) => void;
+  onUpdate?: (partialText: string) => void; // called as text streams in
+  onFinal?: (data: any) => void;             // called when full JSON arrives
+  onError?: (msg: string) => void;
   onComplete?: () => void;
   signal?: AbortSignal;
 };
 
-// Sanitize incoming chunk by removing LLM wrapper metadata
-function sanitizeChunk(raw: string): string {
-  if (!raw) return "";
-  let text = raw;
-  
-  // Remove SSE data: prefix if present
-  text = text.replace(/^data:\s*/gm, "");
-  // Aggressively remove common LLM runtime metadata that may surround the content
-  // Remove map-like metadata blocks: additional_kwargs={...}, response_metadata={...}, usage_metadata={...}
-  text = text.replace(/additional_kwargs=\{[\s\S]*?\}+/g, "");
-  text = text.replace(/response_metadata=\{[\s\S]*?\}+/g, "");
-  text = text.replace(/usage_metadata=\{[\s\S]*?\}+/g, "");
-  // Remove id fields like id='run-...' or id="run-..."
-  text = text.replace(/id=(?:'|\")[^'\"]*(?:'|\")/g, "");
+function sanitizeChunk(input: string): string {
+  if (!input) return "";
+  let s = input.trim();
 
-  // If there are explicit content='...' or content="..." fragments, extract and join them.
-  const contentMatches = [...text.matchAll(/content=(?:'|\")([\s\S]*?)(?:'|\")/g)];
-  if (contentMatches.length > 0) {
-    text = contentMatches.map((m) => m[1] || "").join("");
-  } else {
-    // Fallback: remove any leftover 'content=' literal and surrounding quotes
-    text = text.replace(/content=/g, "");
-    text = text.replace(/^["']|["']$/g, "");
+  // remove leading SSE prefixes if present (defensive)
+  s = s.replace(/^data:\s*/gm, "");
+  s = s.replace(/^event:\s*/gm, "");
+
+  // If the chunk contains a fenced ```json block, try to extract and parse its inner JSON
+  const fencedMatch = s.match(/```json\s*([\s\S]*?)\s*```/i);
+  if (fencedMatch) {
+    const inner = fencedMatch[1];
+    try {
+      const parsed = JSON.parse(inner);
+      const candidate = extractCandidateFromParsed(parsed);
+      if (candidate) return normalizeChunk(candidate);
+    } catch (e) {
+      // if parsing fails, fall back to using the inner text as-is
+      s = inner;
+    }
   }
 
-  // Strip any remaining metadata-like tokens that may trail without braces
-  text = text.replace(/additional_kwargs=[^\s]*/g, "");
-  text = text.replace(/response_metadata=[^\s]*/g, "");
-  text = text.replace(/usage_metadata=[^\s]*/g, "");
+  // If the entire chunk is a JSON object/string, parse it and extract candidate fields
+  try {
+    const maybeJson = JSON.parse(s);
+    const candidate = extractCandidateFromParsed(maybeJson);
+    if (candidate) return normalizeChunk(candidate);
+  } catch (e) {
+    // not JSON — continue
+  }
 
-  // Unescape common sequences and remove escaped double/triple sequences
-  text = text.replace(/\\n/g, "\n");
-  text = text.replace(/\\t/g, "\t");
-  text = text.replace(/\\r/g, "\r");
-  text = text.replace(/\\"/g, '"');
-  text = text.replace(/\\'/g, "'");
+  // unwrap common wrappers like content='...'
+  s = s.replace(/content=(?:'|")([\s\S]*?)(?:'|")/g, "$1");
 
-  // Collapse multiple whitespace/newlines a bit
-  text = text.replace(/\s+\n/g, "\n");
-  text = text.replace(/\n{3,}/g, "\n\n");
+  // remove LLM runtime metadata lines that sometimes appear inline
+  s = s.replace(/additional_kwargs=.*$/gm, "");
+  s = s.replace(/response_metadata=.*$/gm, "");
+  s = s.replace(/usage_metadata=.*$/gm, "");
 
-  return text.trim();
+  // strip stray code fences
+  s = s.replace(/```/g, "");
+
+  // Remove common 'json' sentinel or leading JSON key fragments that sometimes arrive as partial output
+  // e.g. lines like: json\n"full_context": "..."
+  s = s.replace(/^\s*json\b[:\s-]*/i, "");
+  // Remove a leading JSON key if the chunk begins with it (e.g. '"full_context": "..."' or 'full_context": ...')
+  s = s.replace(/^\s*"?[a-zA-Z_][a-zA-Z0-9_]*"?\s*:\s*/i, "");
+
+  return normalizeChunk(s);
 }
 
-// Extract final JSON from accumulated text
-function extractJSON(text: string): any | null {
-  if (!text) return null;
-  
-  // Try fenced code block first
-  const fenceMatch = text.match(/```json\s*([\s\S]*?)\s*```/i);
-  if (fenceMatch) {
-    try {
-      return JSON.parse(fenceMatch[1]);
-    } catch (e) {
-      console.error("Failed to parse fenced JSON:", e);
+function extractCandidateFromParsed(obj: any): string | null {
+  if (!obj) return null;
+  if (typeof obj === 'string') return obj;
+  if (typeof obj === 'object') {
+    // common fields returned by LLM runtimes
+    if (typeof obj.content === 'string') return obj.content;
+    if (typeof obj.full_context === 'string') return obj.full_context;
+    if (typeof obj.summary === 'string') return obj.summary;
+    if (typeof obj.text === 'string') return obj.text;
+    // sometimes the payload is nested
+    for (const k of Object.keys(obj)) {
+      if (typeof obj[k] === 'string') return obj[k];
     }
+    // as a last resort, stringify
+    try { return JSON.stringify(obj); } catch { return null; }
   }
-  
-  // Try to find JSON object by braces
-  const firstBrace = text.indexOf("{");
-  const lastBrace = text.lastIndexOf("}");
-  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-    try {
-      return JSON.parse(text.slice(firstBrace, lastBrace + 1));
-    } catch (e) {
-      console.error("Failed to parse extracted JSON:", e);
-    }
-  }
-  
   return null;
 }
 
+function normalizeChunk(raw: string): string {
+  if (!raw) return "";
+  let t = raw;
+  // unescape common escape sequences (\n, \t) that sometimes appear double-escaped
+  t = t.replace(/\\n/g, "\n");
+  t = t.replace(/\\r/g, "\n");
+  t = t.replace(/\\t/g, "\t");
+  // collapse multiple blank lines to at most two
+  t = t.replace(/\n{3,}/g, "\n\n");
+  // trim trailing/leading whitespace
+  return t.trim();
+}
+
+function extractJSON(text: string): any | null {
+  if (!text) return null;
+  try {
+    const fenced = text.match(/```json\s*([\s\S]*?)\s*```/i);
+    if (fenced) return JSON.parse(fenced[1]);
+  } catch {}
+  try {
+    const open = text.lastIndexOf("{");
+    const close = text.lastIndexOf("}");
+    if (open !== -1 && close > open) {
+      return JSON.parse(text.slice(open, close + 1));
+    }
+  } catch {}
+  return null;
+}
 
 export async function readFullDebateStream(opts: ReadFullDebateOptions): Promise<void> {
   const { date, topic, speaker, onUpdate, onFinal, onError, onComplete, signal } = opts;
-  
   const API_BASE = (import.meta as any).env?.VITE_API_BASE_URL || "http://localhost:8000";
   const url = `${API_BASE}/api/full_debate_stream`;
-  
+
+  // Use fetchEventSource which implements the SSE client behavior similar to the article
   try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Accept": "text/event-stream",
-        "Content-Type": "application/json",
-      },
+    let accumulated = "";
+    let metaBuffer = "";
+
+    await fetchEventSource(url, {
+      method: 'POST',
       body: JSON.stringify({ date, topic, speaker }),
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
       signal,
-    });
+      onmessage(ev) {
+        const data = ev.data;
+        if (!data) return;
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error("Response body is not readable");
-    }
-
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let accumulatedText = "";
-    // Keep a short history of recently appended fragments to avoid duplicates
-    const recentFragments: string[] = [];
-    const pushRecent = (s: string) => {
-      recentFragments.push(s);
-      if (recentFragments.length > 64) recentFragments.shift();
-    };
-    const seenRecently = (s: string) => recentFragments.includes(s);
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = decoder.decode(value, { stream: true });
-      buffer += chunk;
-
-      // --- Immediate best-effort processing ---
-      // Some backends stream many `data: content='...'` fragments without clear SSE event separators.
-      // Extract any content='...' occurrences from the incoming bytes and push them to the accumulator
-      // immediately so the UI can render line-by-line like ChatGPT.
-      try {
-        const immediateMatches = [...chunk.matchAll(/content=(?:'|")([\s\S]*?)(?:'|\")/g)];
-        for (const m of immediateMatches) {
-          const raw = m[1] || "";
-          const sanitized = sanitizeChunk(raw);
-          if (sanitized) {
-            // skip very small or empty fragments
-            if (sanitized.length < 2) continue;
-            // skip if we've seen this exact fragment recently
-            if (seenRecently(sanitized)) continue;
-            accumulatedText += (accumulatedText ? "\n" : "") + sanitized;
-            pushRecent(sanitized);
-            console.debug('[readFullDebateStream] appended immediate sanitized chunk:', sanitized.slice(0, 200));
-            onUpdate?.(accumulatedText);
-          }
-        }
-      } catch (e) {
-        console.warn('readFullDebateStream immediate processing error', e);
-      }
-
-      // Split by double newline (SSE event separator)
-      const events = buffer.split("\n\n");
-      buffer = events.pop() || ""; // Keep incomplete event in buffer
-
-      for (const eventBlock of events) {
-        if (!eventBlock.trim()) continue;
-
-        const lines = eventBlock.split("\n");
-        let eventType = "message";
-        let eventData = "";
-
-        for (const line of lines) {
-          if (line.startsWith("event:")) {
-            eventType = line.replace("event:", "").trim();
-          } else if (line.startsWith("data:")) {
-            eventData += line.replace("data:", "").trim() + "\n";
-          }
-        }
-
-        eventData = eventData.trim();
-        if (!eventData) continue;
-
-        // Handle different event types
-        if (eventData === "[DONE]") {
-          // Stream complete - try to parse final JSON
-          const parsed = extractJSON(accumulatedText);
+        // SSE stream may send a terminal marker
+        if (data === '[DONE]') {
+          const parsed = extractJSON(accumulated + '\n' + metaBuffer);
           if (parsed) {
             onFinal?.(parsed);
           } else {
-            onFinal?.({
-              title: "Full Debate",
-              full_context: accumulatedText,
-              date,
-              speaker,
-            });
+            onFinal?.({ title: 'Full Debate', full_context: accumulated, date, speaker });
           }
           onComplete?.();
           return;
         }
 
-        // Treat plain message events as doc content as well (some backends don't label 'doc')
-        if (eventType === "doc" || eventType === "message") {
-          // Sanitize and accumulate
-          const sanitized = sanitizeChunk(eventData);
-          if (sanitized) {
-            if (sanitized.length < 2) continue;
-            if (seenRecently(sanitized)) {
-              // already appended recently — skip
-            } else {
-              accumulatedText += (accumulatedText ? "\n" : "") + sanitized;
-              pushRecent(sanitized);
-              console.debug('[readFullDebateStream] appended event sanitized chunk:', sanitized.slice(0, 200));
-              onUpdate?.(accumulatedText);
-            }
-          }
-        } else if (eventType === "final") {
-          // Final structured data received
-          try {
-            const parsed = JSON.parse(eventData);
-            onFinal?.(parsed);
+        // If it looks like JSON meta, buffer it until we can parse a full object
+        const looksLikeJsonFragment = /(^|\s)json\b/i.test(data) || /"[a-zA-Z0-9_]+"\s*:\s*/.test(data) || /\{\s*"/.test(data);
+        if (looksLikeJsonFragment) {
+          metaBuffer += '\n' + data;
+          const tryParse = extractJSON(accumulated + '\n' + metaBuffer);
+          if (tryParse) {
+            onFinal?.(tryParse);
             onComplete?.();
-            return;
-          } catch (e) {
-            console.error("Failed to parse final event:", e);
           }
-        } else if (eventType === "error") {
-          const errorMsg = eventData.replace(/^ERROR:\s*/i, "");
-          onError?.(errorMsg);
-          onComplete?.();
           return;
         }
+
+        // sanitize and append normal text fragments
+        const clean = sanitizeChunk(data);
+        if (clean) {
+          accumulated += (accumulated ? '\n' : '') + clean;
+          onUpdate?.(accumulated);
+        }
+      },
+      onerror(err) {
+        // fetchEventSource will call onerror on network errors; bubble up
+        onError?.(err?.message || String(err));
       }
-    }
-
-    // Process any remaining buffer
-    if (buffer.trim()) {
-      const sanitized = sanitizeChunk(buffer);
-      if (sanitized) {
-        accumulatedText += sanitized;
-        onUpdate?.(accumulatedText);
-      }
-    }
-
-    onComplete?.();
-
+    });
   } catch (err: any) {
-    if (err.name === "AbortError") {
-      console.log("Stream aborted by user");
+    if (err?.name === 'AbortError') {
+      console.log('Stream aborted');
     } else {
-      onError?.(err.message || "Failed to stream debate");
+      onError?.(err?.message || 'Failed to stream debate');
     }
     onComplete?.();
   }

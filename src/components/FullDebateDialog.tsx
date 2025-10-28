@@ -1,5 +1,5 @@
 // components/FullDebateDialog.tsx
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Copy, Check } from 'lucide-react';
 import { MarkdownRenderer } from './MarkDownRenderer';
 import { readFullDebateStream } from '@/lib/api';
@@ -18,6 +18,35 @@ export function FullDebateDialog({ open, onClose, date, topic, speaker }: FullDe
   const [finalData, setFinalData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [lastFragments, setLastFragments] = useState<string[]>([]);
+  
+  
+  const [debouncedContent, setDebouncedContent] = useState("");
+  const debouncedTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!streaming) {
+      // when streaming stops, ensure debouncedContent is final
+      setDebouncedContent(streamedContent);
+      if (debouncedTimerRef.current) {
+        window.clearTimeout(debouncedTimerRef.current);
+        debouncedTimerRef.current = null;
+      }
+      return;
+    }
+    // debounce updates to reduce iframe reload frequency but keep it fast for streaming
+    if (debouncedTimerRef.current) window.clearTimeout(debouncedTimerRef.current);
+    debouncedTimerRef.current = window.setTimeout(() => {
+      setDebouncedContent(streamedContent);
+      debouncedTimerRef.current = null;
+    }, 100); // shorter debounce for more immediate markdown updates
+    return () => {
+      if (debouncedTimerRef.current) {
+        window.clearTimeout(debouncedTimerRef.current);
+        debouncedTimerRef.current = null;
+      }
+    };
+  }, [streamedContent, streaming]);
   
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -36,27 +65,41 @@ export function FullDebateDialog({ open, onClose, date, topic, speaker }: FullDe
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
-    await readFullDebateStream({
+    const opts: any = {
       date,
       topic,
       speaker,
       signal: controller.signal,
-      onUpdate: (text) => {
-        setStreamedContent(text);
+      onUpdate: (text: string) => {
+        // compute appended fragment (best-effort) for debug and incremental display
+        setStreamedContent((prev) => {
+          try {
+            const appended = text.startsWith(prev) ? text.slice(prev.length) : text;
+            if (appended && appended.trim()) {
+              setLastFragments((p) => {
+                const next = [...p, appended.trim()].slice(-12);
+                return next;
+              });
+            }
+          } catch (e) {}
+          return text;
+        });
       },
-      onFinal: (data) => {
+      onFinal: (data: any) => {
         setFinalData(data);
         setStreamedContent(""); // Clear preview
         setStreaming(false);
       },
-      onError: (err) => {
+      onError: (err: any) => {
         setError(err);
         setStreaming(false);
       },
       onComplete: () => {
         setStreaming(false);
       },
-    });
+    };
+
+    await readFullDebateStream(opts);
   }
 
   function handleCopy() {
@@ -125,9 +168,13 @@ export function FullDebateDialog({ open, onClose, date, topic, speaker }: FullDe
                 <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse"></div>
                 <span className="text-sm font-medium">Streaming live...</span>
               </div>
+
+              {/* Markdown-rendered preview (updates quickly while streaming) */}
               <div className="prose prose-sm max-w-none">
-                <MarkdownRenderer content={streamedContent} darkMode={false} />
+                <MarkdownRenderer content={debouncedContent} darkMode={false} />
               </div>
+
+              {/* debug UI removed per user request */}
             </div>
           ) : finalData ? (
             <div className="prose prose-sm max-w-none">
