@@ -8,16 +8,7 @@ import SPEAKERS from "@/data/speakers";
 import DATES from "@/data/dates";
 import { MarkdownRenderer } from "@/components/MarkDownRenderer";
 import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogClose,
-} from "@/components/ui/dialog";
+import { FullDebateDialog } from '@/components/FullDebateDialog';
 
 const Hansard = () => {
   const [searchQuery, setSearchQuery] = useState("");
@@ -25,7 +16,6 @@ const Hansard = () => {
   const [speakerFilter, setSpeakerFilter] = useState("Hon. Mahama Ayariga");
   const [topicFilter, setTopicFilter] = useState("all");
 
-  // Sample mock debates shown until backend results appear
   const SAMPLE_DEBATES = [
     {
       id: 1,
@@ -49,22 +39,20 @@ const Hansard = () => {
     }
   ];
 
-  // Debates will be populated from backend search results (start with mock data)
   const [debates, setDebates] = useState<any[]>(SAMPLE_DEBATES);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailData, setDetailData] = useState<any | null>(null);
-  const [searchOpen, setSearchOpen] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
   const [activeDetailId, setActiveDetailId] = useState<number | null>(null);
-  // store last-applied filters so readFullDebate can reuse them
   const [lastAppliedFilters, setLastAppliedFilters] = useState<{
     date?: string;
     topic?: string;
     speaker?: string;
   } | null>(null);
+
+  // New state for FullDebateDialog
+  const [debateDialogOpen, setDebateDialogOpen] = useState(false);
+  const [selectedDebate, setSelectedDebate] = useState<{date: string, topic: string, speaker: string} | null>(null);
 
   const categoryColors: Record<string, string> = {
     Education: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
@@ -72,7 +60,6 @@ const Hansard = () => {
     Technology: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200"
   };
 
-  // Keep a local history of recent debates (persisted to localStorage)
   const [debateHistory, setDebateHistory] = useState<any[]>(() => {
     try {
       const raw = localStorage.getItem('debate_history');
@@ -86,7 +73,6 @@ const Hansard = () => {
     if (!Array.isArray(newDebates) || newDebates.length === 0) return;
     setDebateHistory((prev) => {
       const map = new Map<string, any>();
-      // Newest first: add incoming debates first
       for (const d of newDebates) {
         const key = d.id != null ? `id:${d.id}` : `t:${String(d.title)}:${String(d.date)}`;
         if (!map.has(key) && d) map.set(key, d);
@@ -106,24 +92,19 @@ const Hansard = () => {
   // lazy import the api to avoid unused import before the file exists in the repo
   async function applyFilters() {
     setError(null);
-    setError(null);
     setLoading(true);
     setSearchLoading(true);
     try {
       const { searchDebates } = await import("@/lib/api");
-      // Frontend should send: { date: '29th March 2025', topic: 'Education', speaker: 'Hon. Mahama Ayariga' }
       const dateToSend = formatOrdinalDate(dateFilter || searchQuery || "");
       const body = {
         date: dateToSend,
         topic: topicFilter === "all" ? undefined : topicFilter,
         speaker: speakerFilter === "all" ? undefined : speakerFilter,
       };
-      // store filters used for this search so readFullDebate can reuse them
       setLastAppliedFilters({ date: body.date, topic: body.topic, speaker: body.speaker });
       const res = await searchDebates(body as any);
 
-      // Backend returns a summary field that contains a fenced code block with JSON.
-      // Try to extract the JSON from the fenced block and parse it.
       const fencedJsonMatch = res.summary?.match(/```json\s*([\s\S]*?)\s*```/i);
       if (fencedJsonMatch && fencedJsonMatch[1]) {
         try {
@@ -142,12 +123,9 @@ const Hansard = () => {
           setDebates(newDebates);
           addToHistory(newDebates);
           return;
-        } catch (e) {
-          // fallthrough to using the response directly
-        }
+        } catch (e) {}
       }
 
-      // Fallback: create a single debate entry from the response fields
       const newDebates = [
         {
           id: 0,
@@ -169,59 +147,26 @@ const Hansard = () => {
     }
   }
 
-  async function readFullDebate(id: number) {
-    setError(null);
-    setDetailData(null);
-    setDetailOpen(true);
-    setDetailLoading(true);
-    setActiveDetailId(id);
-    try {
-      const { getFullDebate } = await import("@/lib/api");
-      // Format the debate date as '29th March 2025' if available for the API
-      const target = debates.find((d) => d.id === id);
-      // Compute date to send: prefer the debate's date, then last applied filters, then undefined
-      const dateFromTarget = target && target.date ? target.date : undefined;
-      const dateToSend = dateFromTarget
-        ? formatOrdinalDate(dateFromTarget)
-        : lastAppliedFilters?.date
-        ? formatOrdinalDate(lastAppliedFilters.date as string)
-        : undefined;
+  // New simplified function for opening the FullDebateDialog
+  function openFullDebate(debate: any) {
+    const dateFromTarget = debate.date || dateFilter;
+    const topicFromTarget = debate.category || (Array.isArray(debate.tags) ? debate.tags[0] : undefined);
+    const topicFromFilters = topicFilter && topicFilter !== "all" ? topicFilter : undefined;
+    const topic = topicFromTarget || topicFromFilters || lastAppliedFilters?.topic || "General";
+    
+    const speaker = debate.speaker || speakerFilter || lastAppliedFilters?.speaker || "";
 
-      // Determine topic: prefer debate.category, then first tag, then currently selected topicFilter (if not 'all'),
-      // then fall back to lastAppliedFilters.topic
-      const topicFromTarget = target?.category || (Array.isArray(target?.tags) ? target.tags[0] : undefined);
-      const topicFromFilters = topicFilter && topicFilter !== "all" ? topicFilter : undefined;
-      const topic = topicFromTarget || topicFromFilters || lastAppliedFilters?.topic || undefined;
-
-      // Determine speaker: prefer debate.speaker, then currently selected speakerFilter (if not 'all'), then lastAppliedFilters.speaker
-      const speaker = target?.speaker || (speakerFilter && speakerFilter !== "all" ? speakerFilter : lastAppliedFilters?.speaker || undefined);
-
-      // Validate required fields before calling backend (backend requires topic)
-      if (!topic) {
-        setError("Topic is required to fetch the full debate. Please select a topic or apply filters first.");
-        setDetailLoading(false);
-        setActiveDetailId(null);
-        return;
-      }
-
-      // getFullDebate will POST { id, date, topic, speaker }
-      const detail = await getFullDebate(id, dateToSend, topic as any, speaker as any);
-      setDetailData(detail);
-    } catch (err: any) {
-      setError(err?.message || "Failed to load full debate");
-    } finally {
-      setDetailLoading(false);
-      setActiveDetailId(null);
-    }
+    setSelectedDebate({
+      date: formatOrdinalDate(dateFromTarget),
+      topic,
+      speaker,
+    });
+    setDebateDialogOpen(true);
   }
 
   function formatOrdinalDate(dateInput: string) {
-    // Try to parse a date string. If it's already in a readable format, attempt Date parsing.
     const dt = new Date(dateInput);
-    if (isNaN(dt.getTime())) {
-      // If parsing fails, return the original string (best-effort)
-      return dateInput;
-    }
+    if (isNaN(dt.getTime())) return dateInput;
     const day = dt.getDate();
     const month = dt.toLocaleString("en-US", { month: "long" });
     const year = dt.getFullYear();
@@ -232,7 +177,7 @@ const Hansard = () => {
     return `${ordinal(day)} ${month} ${year}`;
   }
 
-  // Autocomplete state for dates and speakers (custom dropdown)
+  // Autocomplete state for dates and speakers
   const [showDatesList, setShowDatesList] = useState(false);
   const [showSpeakersList, setShowSpeakersList] = useState(false);
   const [filteredDates, setFilteredDates] = useState<string[]>(DATES);
@@ -241,31 +186,17 @@ const Hansard = () => {
   const speakerInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    // When dateFilter changes, update filteredDates (show full list when empty)
-    if (!dateFilter) {
-      setFilteredDates(DATES);
-    } else {
-      const q = dateFilter.toLowerCase();
-      setFilteredDates(DATES.filter((d) => d.toLowerCase().includes(q)));
-    }
+    if (!dateFilter) setFilteredDates(DATES);
+    else setFilteredDates(DATES.filter((d) => d.toLowerCase().includes(dateFilter.toLowerCase())));
   }, [dateFilter]);
 
   useEffect(() => {
-    if (!speakerFilter || speakerFilter === "all") {
-      setFilteredSpeakers(SPEAKERS);
-    } else {
-      const q = speakerFilter.toLowerCase();
-      setFilteredSpeakers(SPEAKERS.filter((s) => s.toLowerCase().includes(q)));
-    }
+    if (!speakerFilter || speakerFilter === "all") setFilteredSpeakers(SPEAKERS);
+    else setFilteredSpeakers(SPEAKERS.filter((s) => s.toLowerCase().includes(speakerFilter.toLowerCase())));
   }, [speakerFilter]);
 
-  // helpers that allow clicks inside the dropdown before blur hides it
-  function handleDateBlur() {
-    setTimeout(() => setShowDatesList(false), 150);
-  }
-  function handleSpeakerBlur() {
-    setTimeout(() => setShowSpeakersList(false), 150);
-  }
+  function handleDateBlur() { setTimeout(() => setShowDatesList(false), 150); }
+  function handleSpeakerBlur() { setTimeout(() => setShowSpeakersList(false), 150); }
 
   return (
     <div className="space-y-6 pb-20 md:pb-6">
@@ -301,12 +232,12 @@ const Hansard = () => {
 
           {/* Filters Row */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {/* Date Filter */}
             <div className="space-y-2">
               <label className="text-sm font-medium flex items-center gap-2">
                 <Calendar className="h-4 w-4" />
                 Date
               </label>
-              {/* Free-text date input with native datalist suggestions (hybrid single box) */}
               <div className="relative">
                 <Input
                   ref={dateInputRef}
@@ -315,7 +246,6 @@ const Hansard = () => {
                   onChange={(e) => setDateFilter(e.target.value)}
                   onFocus={() => setShowDatesList(true)}
                   onBlur={handleDateBlur}
-                  aria-label="Date filter (e.g. 1st July 2025)"
                 />
                 {showDatesList && (
                   <div className="absolute z-50 mt-1 w-full max-h-60 overflow-auto rounded-md border bg-popover p-1">
@@ -327,10 +257,7 @@ const Hansard = () => {
                           key={d}
                           type="button"
                           onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => {
-                            setDateFilter(d);
-                            setShowDatesList(false);
-                          }}
+                          onClick={() => { setDateFilter(d); setShowDatesList(false); }}
                           className="block w-full text-left px-3 py-2 text-sm hover:bg-accent/20"
                         >
                           {d}
@@ -342,12 +269,12 @@ const Hansard = () => {
               </div>
             </div>
 
+            {/* Speaker Filter */}
             <div className="space-y-2">
               <label className="text-sm font-medium flex items-center gap-2">
                 <User className="h-4 w-4" />
                 Speaker
               </label>
-              {/* Free-text speaker input with native datalist suggestions (hybrid single box) */}
               <div className="relative">
                 <Input
                   ref={speakerInputRef}
@@ -356,7 +283,6 @@ const Hansard = () => {
                   onChange={(e) => setSpeakerFilter(e.target.value)}
                   onFocus={() => setShowSpeakersList(true)}
                   onBlur={handleSpeakerBlur}
-                  aria-label="Speaker filter (e.g. Hon. Mahama Ayariga)"
                 />
                 {showSpeakersList && (
                   <div className="absolute z-50 mt-1 w-full max-h-72 overflow-auto rounded-md border bg-popover p-1">
@@ -368,10 +294,7 @@ const Hansard = () => {
                           key={s}
                           type="button"
                           onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => {
-                            setSpeakerFilter(s);
-                            setShowSpeakersList(false);
-                          }}
+                          onClick={() => { setSpeakerFilter(s); setShowSpeakersList(false); }}
                           className="block w-full text-left px-3 py-2 text-sm hover:bg-accent/20"
                         >
                           {s}
@@ -383,6 +306,7 @@ const Hansard = () => {
               </div>
             </div>
 
+            {/* Topic Filter */}
             <div className="space-y-2">
               <label className="text-sm font-medium flex items-center gap-2">
                 <Tag className="h-4 w-4" />
@@ -403,6 +327,7 @@ const Hansard = () => {
               </Select>
             </div>
 
+            {/* Apply Filters Button */}
             <div className="flex items-end">
               <Button onClick={applyFilters} className="w-full gap-2">
                 {searchLoading ? (
@@ -420,32 +345,32 @@ const Hansard = () => {
         </CardContent>
       </Card>
 
-        {/* Recent searches / history */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">Recent Searches</CardTitle>
-            <CardDescription>Last {debateHistory?.length || 0} debates you opened</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {debateHistory.length === 0 ? (
-              <div className="text-sm text-muted-foreground">No recent debates</div>
-            ) : (
-              <div className="grid gap-2">
-                {debateHistory.map((d: any) => (
-                  <div key={(d.id ?? d.title) + String(d.date)} className="flex items-center justify-between gap-2">
-                    <div>
-                      <div className="font-medium text-sm">{d.title}</div>
-                      <div className="text-xs text-muted-foreground">{d.date} — {d.speaker || ''}</div>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => readFullDebate(d.id ?? 0)}>Open</Button>
-                    </div>
+      {/* Recent Searches / History */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">Recent Searches</CardTitle>
+          <CardDescription>Last {debateHistory?.length || 0} debates you opened</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {debateHistory.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No recent debates</div>
+          ) : (
+            <div className="grid gap-2">
+              {debateHistory.map((d: any) => (
+                <div key={(d.id ?? d.title) + String(d.date)} className="flex items-center justify-between gap-2">
+                  <div>
+                    <div className="font-medium text-sm">{d.title}</div>
+                    <div className="text-xs text-muted-foreground">{d.date} — {d.speaker || ''}</div>
                   </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                  <div className="flex gap-2">
+                    <Button variant="ghost" size="sm" onClick={() => openFullDebate(d)}>Open</Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Debate Cards */}
       <div className="grid gap-6">
@@ -496,7 +421,7 @@ const Hansard = () => {
                 })()}
               </div>
 
-              <Button onClick={() => readFullDebate(debate.id)} className="w-full md:w-auto">
+              <Button onClick={() => openFullDebate(debate)} className="w-full md:w-auto">
                 Read Full Debate
               </Button>
             </CardContent>
@@ -504,121 +429,16 @@ const Hansard = () => {
         ))}
       </div>
 
-      {/* Full debate dialog */}
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{detailData?.title || "Full Debate"}</DialogTitle>
-            <DialogDescription>
-              {detailData ? `${detailData.speaker || ""} — ${detailData.date || ""}` : ""}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="mt-4 max-h-[60vh] overflow-auto">
-            {detailLoading ? (
-              <div className="flex items-center justify-center py-12">
-                <svg className="h-8 w-8 animate-spin text-muted-foreground" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-                </svg>
-              </div>
-            ) : detailData ? (
-              <div className="prose prose-sm">
-                <MarkdownRenderer content={detailData.fullText || ""} darkMode={false} />
-              </div>
-            ) : (
-              <div>{error || "No content available."}</div>
-            )}
-          </div>
-
-          <DialogFooter>
-            <Button onClick={() => setDetailOpen(false)}>Close</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Search results dialog for Apply Filters */}
-      <Dialog open={searchOpen} onOpenChange={setSearchOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Search Results</DialogTitle>
-            <DialogDescription>Filtered Hansard results</DialogDescription>
-          </DialogHeader>
-
-          <div className="mt-4 max-h-[60vh] overflow-auto">
-            {searchLoading ? (
-              <div className="flex items-center justify-center py-12">
-                <svg className="h-8 w-8 animate-spin text-muted-foreground" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-                </svg>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {debates.map((debate) => (
-                  <Card key={debate.id} className="hover:shadow-lg transition-shadow">
-                    <CardHeader>
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="space-y-2 flex-1">
-                          <Badge className={categoryColors[debate.category || ""] || ""}>
-                            {debate.category || ""}
-                          </Badge>
-                          <CardTitle className="text-xl">{debate.title}</CardTitle>
-                          <CardDescription>{debate.description}</CardDescription>
-                        </div>
-                        <Button variant="ghost" size="icon">
-                          <ExternalLink className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
-                        <div className="flex items-center gap-2">
-                          <Calendar className="h-4 w-4" />
-                          {debate.date}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <User className="h-4 w-4" />
-                          {debate.speaker}
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2">
-                        {(() => {
-                          const tags: string[] = Array.isArray(debate.tags)
-                            ? debate.tags
-                            : typeof debate.tags === "string"
-                            ? debate.tags.split(",").map((t: string) => t.trim())
-                            : [];
-                          return tags.map((tag: string) => (
-                            <Badge key={tag} variant="outline">
-                              {tag}
-                            </Badge>
-                          ));
-                        })()}
-                      </div>
-
-                      <Button onClick={() => readFullDebate(debate.id)} className="w-full md:w-auto">
-                        {activeDetailId === debate.id ? (
-                          <svg className="h-4 w-4 animate-spin mr-2 inline-block" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-                          </svg>
-                        ) : null}
-                        Read Full Debate
-                      </Button>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <DialogFooter>
-            <Button onClick={() => setSearchOpen(false)}>Close</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* FullDebateDialog */}
+      {selectedDebate && (
+        <FullDebateDialog
+          open={debateDialogOpen}
+          onClose={() => setDebateDialogOpen(false)}
+          date={selectedDebate.date}
+          topic={selectedDebate.topic}
+          speaker={selectedDebate.speaker}
+        />
+      )}
     </div>
   );
 };
